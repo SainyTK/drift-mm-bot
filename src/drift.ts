@@ -24,6 +24,7 @@ import {
   BASE_PRECISION,
   calculateBidAskPrice,
   QUOTE_PRECISION,
+  OrderStatus,
 } from "@drift-labs/sdk";
 import { AnchorProvider, BN } from "@project-serum/anchor";
 import { convertSecretKeyToKeypair } from "@slidelabs/solana-toolkit/build/utils/convertSecretKeyToKeypair";
@@ -109,10 +110,8 @@ export class Drift {
   async initBot() {
     logger.info(`${this.botName} initing`);
 
-    const dlob = new DLOB();
-
-    setInterval(async () => {
-      if (this.runingTransaction) return;
+    this.slotSubscriber.eventEmitter.on("newSlot", async (slot) => {
+      const dlob = new DLOB();
 
       if (this.marketIndex === 5) {
         this.marketIndex = 0;
@@ -125,7 +124,6 @@ export class Drift {
       const oraclePriceData = this.driftClient.getOraclePriceDataAndSlot(
         this.marketAccount.amm.oracle
       );
-      const slot = this.slotSubscriber.getSlot();
 
       const l2 = dlob.getL2({
         marketIndex: this.marketIndex,
@@ -150,11 +148,9 @@ export class Drift {
         ],
       });
 
-      console.log(l2.bids.length);
       this.updateOpenOrdersForMarket(this.marketAccount, l2);
-
       this.marketIndex += 1;
-    }, 1000);
+    });
   }
 
   private async updateOpenOrdersForMarket(
@@ -166,7 +162,6 @@ export class Drift {
 
     // LONG
     const longInstructions = [];
-
     if (
       this.driftClient
         .getUserAccount()
@@ -202,18 +197,26 @@ export class Drift {
       longInstructions.push(instructionPlaceOrder);
     }
 
-    this.runingTransaction = true;
     const transactionLong = new Transaction();
     transactionLong.instructions = longInstructions;
 
-    await this.driftClient.sendTransaction(transactionLong);
+    const longTx = await this.driftClient.sendTransaction(transactionLong);
 
-    this.runingTransaction = false;
+    const longBlock = await this.connection.getLatestBlockhash();
+
+    await connection.confirmTransaction(
+      {
+        signature: longTx.txSig,
+        blockhash: longBlock.blockhash,
+        lastValidBlockHeight: longBlock.lastValidBlockHeight,
+      },
+      "processed"
+    );
+
     console.log(`NEW LONG ORDERS SUBMITTED - ${marketConfig.symbol}`);
 
     // SHORT
     const shortInstructions = [];
-
     if (
       this.driftClient
         .getUserAccount()
@@ -252,13 +255,21 @@ export class Drift {
       shortInstructions.push(instructionPlaceOrder);
     }
 
-    this.runingTransaction = true;
     const stTransaction = new Transaction();
     stTransaction.instructions = shortInstructions;
 
-    await this.driftClient.sendTransaction(stTransaction);
+    const tx = await this.driftClient.sendTransaction(stTransaction);
 
-    this.runingTransaction = false;
+    const stBlock = await this.connection.getLatestBlockhash();
+
+    await connection.confirmTransaction(
+      {
+        signature: tx.txSig,
+        blockhash: stBlock.blockhash,
+        lastValidBlockHeight: stBlock.lastValidBlockHeight,
+      },
+      "processed"
+    );
     console.log(`NEW SHORT ORDERS SUBMITTED - ${marketConfig.symbol}`);
   }
 
@@ -311,11 +322,11 @@ export class Drift {
 //
 
 const ORDER_SIZE: { [key: number]: BN } = {
-  0: QUOTE_PRECISION.mul(new BN(2800)), // SOL
-  1: new BN(2000000), // BT
+  0: QUOTE_PRECISION.mul(new BN(2500)), // SOL
+  1: new BN(2000000), // BTC
   2: new BN(20000000), // ETH
   3: new BN(5500000000), // APT
-  4: new BN(50000000000), // 1MBONK
+  4: new BN(30000000000), // 1MBONK
   // 5: new BN(10000000000), // MATIC
   // 6: new BN(10000000000), //  ARB
   // 7: new BN(100000000000), // DOGE
