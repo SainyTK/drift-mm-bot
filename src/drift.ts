@@ -311,11 +311,11 @@ export class Drift {
 //
 
 const ORDER_SIZE: { [key: number]: BN } = {
-  0: QUOTE_PRECISION.mul(new BN(1000)), // SOL
-  1: new BN(1000000), // BT
-  2: new BN(10000000), // ETH
-  3: new BN(5000000000), // APT
-  4: new BN(10000000000), // 1MBONK
+  0: QUOTE_PRECISION.mul(new BN(2800)), // SOL
+  1: new BN(2000000), // BT
+  2: new BN(20000000), // ETH
+  3: new BN(5500000000), // APT
+  4: new BN(50000000000), // 1MBONK
   // 5: new BN(10000000000), // MATIC
   // 6: new BN(10000000000), //  ARB
   // 7: new BN(100000000000), // DOGE
