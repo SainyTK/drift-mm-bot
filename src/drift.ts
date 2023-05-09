@@ -23,12 +23,14 @@ import {
   getLimitOrderParams,
   BASE_PRECISION,
   calculateBidAskPrice,
+  QUOTE_PRECISION,
 } from "@drift-labs/sdk";
 import { AnchorProvider, BN } from "@project-serum/anchor";
 import { convertSecretKeyToKeypair } from "@slidelabs/solana-toolkit/build/utils/convertSecretKeyToKeypair";
 import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { connection, env } from "./config/solanaConnection";
 import { logger } from "./utils/logger";
+import sleep from "./utils/sleep";
 
 export class Drift {
   public env: DriftEnv = env;
@@ -67,7 +69,7 @@ export class Drift {
     this.bulkAccountLoader = new BulkAccountLoader(
       this.connection,
       "confirmed",
-      10000
+      1000
     );
     const { oracleInfos, perpMarketIndexes, spotMarketIndexes } =
       getMarketsAndOraclesForSubscription(this.env);
@@ -110,15 +112,15 @@ export class Drift {
     const dlob = new DLOB();
 
     setInterval(async () => {
-      // if (this.marketIndex > 8) {
-      //   this.marketIndex = 0;
-      // }
+      if (this.runingTransaction) return;
+
+      if (this.marketIndex === 5) {
+        this.marketIndex = 0;
+      }
 
       this.marketAccount = this.driftClient.getPerpMarketAccount(
         this.marketIndex
       );
-
-      if (this.runingTransaction) return;
 
       const oraclePriceData = this.driftClient.getOraclePriceDataAndSlot(
         this.marketAccount.amm.oracle
@@ -128,7 +130,7 @@ export class Drift {
       const l2 = dlob.getL2({
         marketIndex: this.marketIndex,
         marketType: MarketType.PERP,
-        depth: 12,
+        depth: 3,
         oraclePriceData: oraclePriceData.data,
         slot: slot,
         fallbackBid: calculateBidPrice(
@@ -143,7 +145,7 @@ export class Drift {
           getVammL2Generator({
             marketAccount: this.marketAccount,
             oraclePriceData: oraclePriceData.data,
-            numOrders: 12,
+            numOrders: 3,
           }),
         ],
       });
@@ -151,8 +153,8 @@ export class Drift {
       console.log(l2.bids.length);
       this.updateOpenOrdersForMarket(this.marketAccount, l2);
 
-      // this.marketIndex += 1;
-    }, 5000);
+      this.marketIndex += 1;
+    }, 1000);
   }
 
   private async updateOpenOrdersForMarket(
@@ -180,18 +182,18 @@ export class Drift {
       longInstructions.push(instructionCancelLongOrders);
     }
 
-    for (let i = 2; i < orders.bids.length; i++) {
-      const oder = orders.bids[i];
+    for (let i = 0; i < orders.bids.length; i++) {
+      const order = orders.bids[i];
 
-      console.log(convertToNumber(oder.price, PRICE_PRECISION));
+      console.log(convertToNumber(order.price, PRICE_PRECISION));
       const perpMarketPrice =
         this.driftClient.getPerpMarketAccount(marketIndex);
 
       const marketOrderParams = getLimitOrderParams({
-        baseAssetAmount: BASE_PRECISION.mul(new BN(1)),
+        baseAssetAmount: ORDER_SIZE[marketIndex],
         direction: PositionDirection.LONG,
         marketIndex: perpMarketPrice.marketIndex,
-        price: oder.price,
+        price: order.price,
       });
 
       const instructionPlaceOrder = await this.driftClient.getPlacePerpOrderIx(
@@ -204,18 +206,7 @@ export class Drift {
     const transactionLong = new Transaction();
     transactionLong.instructions = longInstructions;
 
-    const txLong = await this.driftClient.sendTransaction(transactionLong);
-
-    const lbLong = await connection.getLatestBlockhash();
-
-    await connection.confirmTransaction(
-      {
-        signature: txLong.txSig,
-        blockhash: lbLong.blockhash,
-        lastValidBlockHeight: lbLong.lastValidBlockHeight,
-      },
-      "finalized"
-    );
+    await this.driftClient.sendTransaction(transactionLong);
 
     this.runingTransaction = false;
     console.log(`NEW LONG ORDERS SUBMITTED - ${marketConfig.symbol}`);
@@ -240,19 +231,19 @@ export class Drift {
       } catch {}
     }
 
-    for (let i = 2; i < orders.asks.length; i++) {
-      const oder = orders.asks[i];
+    for (let i = 0; i < orders.asks.length; i++) {
+      const order = orders.asks[i];
 
-      console.log(convertToNumber(oder.price, PRICE_PRECISION));
+      console.log(convertToNumber(order.price, PRICE_PRECISION));
 
       const perpMarketPrice =
         this.driftClient.getPerpMarketAccount(marketIndex);
 
       const marketOrderParams = getLimitOrderParams({
-        baseAssetAmount: BASE_PRECISION.mul(new BN(1)),
+        baseAssetAmount: ORDER_SIZE[marketIndex],
         direction: PositionDirection.SHORT,
         marketIndex: perpMarketPrice.marketIndex,
-        price: oder.price,
+        price: order.price,
       });
 
       const instructionPlaceOrder = await this.driftClient.getPlacePerpOrderIx(
@@ -265,18 +256,7 @@ export class Drift {
     const stTransaction = new Transaction();
     stTransaction.instructions = shortInstructions;
 
-    const stTx = await this.driftClient.sendTransaction(stTransaction);
-
-    const stLb = await connection.getLatestBlockhash();
-
-    await connection.confirmTransaction(
-      {
-        signature: stTx.txSig,
-        blockhash: stLb.blockhash,
-        lastValidBlockHeight: stLb.lastValidBlockHeight,
-      },
-      "finalized"
-    );
+    await this.driftClient.sendTransaction(stTransaction);
 
     this.runingTransaction = false;
     console.log(`NEW SHORT ORDERS SUBMITTED - ${marketConfig.symbol}`);
@@ -329,6 +309,18 @@ export class Drift {
 //
 // Utils
 //
+
+const ORDER_SIZE: { [key: number]: BN } = {
+  0: QUOTE_PRECISION.mul(new BN(1000)), // SOL
+  1: new BN(1000000), // BT
+  2: new BN(10000000), // ETH
+  3: new BN(5000000000), // APT
+  4: new BN(10000000000), // 1MBONK
+  // 5: new BN(10000000000), // MATIC
+  // 6: new BN(10000000000), //  ARB
+  // 7: new BN(100000000000), // DOGE
+  // 8: new BN(100000000), // BNB
+};
 
 export type TOKENS =
   | "BONK"
