@@ -18,6 +18,12 @@ import {
   OrderStatus,
   User,
   PostOnlyParams,
+  UserMap,
+  DLOBSubscriber,
+  DLOB,
+  calculateBidPrice,
+  calculateAskPrice,
+  getVammL2Generator,
 } from "@drift-labs/sdk";
 import { AnchorProvider, BN } from "@project-serum/anchor";
 import { convertSecretKeyToKeypair } from "@slidelabs/solana-toolkit/build/utils/convertSecretKeyToKeypair";
@@ -44,13 +50,12 @@ export class Drift {
   private wallet: Wallet;
   private bulkAccountLoader: BulkAccountLoader;
   private botAccount: string;
-  private currentSymbolIndex: number = 0;
 
   constructor(botAccount: string) {
     this.botAccount = botAccount;
   }
 
-  setup = async () => {
+  public setup = async () => {
     this.account = convertSecretKeyToKeypair(this.botAccount);
     this.wallet = new Wallet(this.account);
 
@@ -63,7 +68,7 @@ export class Drift {
     this.bulkAccountLoader = new BulkAccountLoader(
       this.connection,
       "processed",
-      500
+      1000
     );
 
     this.driftClient = new DriftClient({
@@ -92,52 +97,150 @@ export class Drift {
 
     this.slotSubscriber = new SlotSubscriber(connection);
     await this.slotSubscriber.subscribe();
-
-    // this.initBot();
   };
 
-  async initBot() {
-    console.log("NEW ORDERS");
-    let orders: Order = {};
+  public startBot = async (subAccount: number, symbol: string) => {
+    let orders: Order = {
+      bid: [],
+      ask: [],
+    };
 
-    for (
-      this.currentSymbolIndex = 0;
-      this.currentSymbolIndex < 7;
-      this.currentSymbolIndex++
-    ) {
-      const symbol = TOKENS[this.currentSymbolIndex];
-      const marketConfig = this.fetchPerpMarket(
-        TOKENS[this.currentSymbolIndex]
-      );
+    this.driftClient.switchActiveUser(subAccount);
 
-      if (!orders[marketConfig.baseAssetSymbol]) {
-        orders[marketConfig.baseAssetSymbol] = {
-          bid: [],
-          ask: [],
-        };
+    const oraclePriceData = this.fetchOraclePrice(symbol);
+    const marketConfig = this.fetchPerpMarket(symbol);
+    const marketAccount = this.driftClient.getPerpMarketAccount(
+      marketConfig.marketIndex
+    );
+
+    const slot = this.slotSubscriber.getSlot();
+
+    const dlob = new DLOB();
+    const l2 = dlob.getL2({
+      marketIndex: marketConfig.marketIndex,
+      marketType: MarketType.PERP,
+      depth: 10000,
+      oraclePriceData,
+      slot: slot,
+      fallbackBid: calculateBidPrice(marketAccount, oraclePriceData),
+      fallbackAsk: calculateAskPrice(marketAccount, oraclePriceData),
+      fallbackL2Generators: [
+        getVammL2Generator({
+          marketAccount: marketAccount,
+          oraclePriceData,
+          numOrders: 10000,
+        }),
+      ],
+    });
+
+    console.log("********************************");
+
+    const oraclePrice = convertToNumber(oraclePriceData.price);
+
+    console.log(symbol);
+    console.log("oraclePrice", oraclePrice);
+    l2.bids.forEach((bid) => {
+      const bidPrice = convertToNumber(bid.price);
+      const dif = (oraclePrice - bidPrice) / 100;
+
+      if (orders.bid.length > 14) {
+        return;
       }
 
-      // while (orders[marketConfig.baseAssetSymbol]?.bid.length < 2) {
-      const currentPrice = this.fetchPrice(symbol);
-      const oraclePrice = this.fetchOraclePrice(symbol);
+      if (dif < 0.5) {
+        orders.bid.push(bid.price);
+      }
+    });
 
-      console.log("----------------------");
-      console.log("Symbol", symbol);
-      console.log("BID", convertToNumber(currentPrice[0]));
-      console.log("ASK", convertToNumber(currentPrice[1]));
-      console.log("OraclePrice", convertToNumber(oraclePrice.price));
-      console.log("----------------------");
+    l2.asks.forEach((ask) => {
+      const askPrice = convertToNumber(ask.price);
+      const dif = (askPrice - oraclePrice) / 100;
 
-      orders[marketConfig.baseAssetSymbol].bid.push(currentPrice[0]);
-      orders[marketConfig.baseAssetSymbol].ask.push(currentPrice[1]);
-      // }
+      if (orders.ask.length > 14) {
+        return;
+      }
+
+      if (dif < 0.8) {
+        orders.ask.push(ask.price);
+      }
+    });
+
+    this.openOrders(orders, subAccount, symbol);
+  };
+
+  private openOrders = async (
+    orders: Order,
+    subAccount: number,
+    symbol: string
+  ) => {
+    const marketConfig = this.fetchPerpMarket(symbol);
+    const longInstructions: TransactionInstruction[] = [];
+    const shortInstructions: TransactionInstruction[] = [];
+
+    console.log("marketConfig", marketConfig.baseAssetSymbol);
+
+    if (
+      this.driftClient
+        .getUserAccount()
+        .orders.find((item) => item.marketIndex === marketConfig.marketIndex)
+    ) {
+      const cancelLongInstructions = await this.driftClient.getCancelOrdersIx(
+        MarketType.PERP,
+        marketConfig.marketIndex,
+        PositionDirection.LONG
+      );
+
+      longInstructions.push(cancelLongInstructions);
+
+      const cancelShortInstructions = await this.driftClient.getCancelOrdersIx(
+        MarketType.PERP,
+        marketConfig.marketIndex,
+        PositionDirection.SHORT
+      );
+
+      shortInstructions.push(cancelShortInstructions);
     }
 
-    if (this.currentSymbolIndex === 7) {
-      this.openOrders(orders);
-      orders = {};
+    // LONG
+    const instructionPlaceLongOrders = await this.placeOrders(
+      orders.bid,
+      marketConfig,
+      PositionDirection.LONG
+    );
+    if (instructionPlaceLongOrders?.length > 0) {
+      longInstructions.push(...instructionPlaceLongOrders);
     }
-  }
+
+    const longTransaction = new Transaction();
+    longTransaction.instructions = longInstructions;
+
+    await this.driftClient.sendTransaction(longTransaction);
+
+    // SHORT
+    const instructionPlaceShortOrders = await this.placeOrders(
+      orders.ask,
+      marketConfig,
+      PositionDirection.SHORT
+    );
+    if (instructionPlaceShortOrders?.length > 0) {
+      shortInstructions.push(...instructionPlaceShortOrders);
+    }
+
+    const shortTransaction = new Transaction();
+    shortTransaction.instructions = shortInstructions;
+
+    await this.driftClient.sendTransaction(shortTransaction);
+
+    console.log(`DONE ${symbol}`);
+
+    console.log("GENERAL DONE");
+
+    await sleep(1000);
+
+    console.log("RESTART");
+
+    this.startBot(subAccount, symbol);
+  };
 
   private placeOrders = async (
     orders: BN[],
@@ -171,75 +274,11 @@ export class Drift {
     return instructions;
   };
 
-  private openOrders = async (orders: Order) => {
-    for (let i = 0; i < Object.keys(orders).length; i++) {
-      const symbol = Object.keys(orders)[i];
-      const marketConfig = this.fetchPerpMarket(symbol);
-      const instructions: TransactionInstruction[] = [];
-
-      if (
-        this.driftClient
-          .getUserAccount()
-          .orders.find((item) => item.marketIndex === marketConfig.marketIndex)
-      ) {
-        const longInstructions = await this.driftClient.getCancelOrdersIx(
-          MarketType.PERP,
-          marketConfig.marketIndex,
-          PositionDirection.LONG
-        );
-
-        instructions.push(longInstructions);
-
-        const shortInstructions = await this.driftClient.getCancelOrdersIx(
-          MarketType.PERP,
-          marketConfig.marketIndex,
-          PositionDirection.SHORT
-        );
-
-        instructions.push(shortInstructions);
-      }
-
-      // LONG
-      const instructionPlaceLongOrders = await this.placeOrders(
-        orders[symbol].bid,
-        marketConfig,
-        PositionDirection.LONG
-      );
-      if (instructionPlaceLongOrders?.length > 0) {
-        instructions.push(...instructionPlaceLongOrders);
-      }
-
-      // SHORT
-      const instructionPlaceShortOrders = await this.placeOrders(
-        orders[symbol].ask,
-        marketConfig,
-        PositionDirection.SHORT
-      );
-      if (instructionPlaceShortOrders?.length > 0) {
-        instructions.push(...instructionPlaceShortOrders);
-      }
-
-      const transaction = new Transaction();
-      transaction.instructions = instructions;
-
-      await this.driftClient.sendTransaction(transaction, undefined, {
-        commitment: "processed",
-      });
-
-      console.log(`DONE ${symbol}`);
-    }
-
-    console.log("GENERAL DONE");
-    this.currentSymbolIndex = 0;
-    await sleep(2000);
-    this.initBot();
-  };
-
-  fetchPerpMarket = (symbol: string) => {
+  public fetchPerpMarket = (symbol: string) => {
     return this.perpMarkets.find((market) => market.baseAssetSymbol === symbol);
   };
 
-  fetchPrice = (symbol: string) => {
+  public fetchPrice = (symbol: string) => {
     try {
       const marketInfo = this.fetchPerpMarket(symbol);
 
@@ -262,7 +301,7 @@ export class Drift {
     } catch {}
   };
 
-  fetchOraclePrice = (symbol: string) => {
+  public fetchOraclePrice = (symbol: string) => {
     try {
       const makertInfo = this.fetchPerpMarket(symbol);
 
@@ -281,13 +320,22 @@ export class Drift {
 // Utils
 //
 
-const TOKENS = ["SOL", "BTC", "ETH", "APT", "1MBONK", "MATIC", "ARB"];
+export const SUB_ACCOUNTS: { [key: string]: number } = {
+  SOL: 0,
+  BTC: 1,
+  ETH: 2,
+  MATIC: 3,
+  "1MBONK": 4,
+  APT: 5,
+  ARB: 6,
+  BNB: 7,
+};
 
 const ORDER_SIZE: { [key: string]: BN } = {
-  SOL: QUOTE_PRECISION.mul(new BN(15000)),
-  BTC: new BN(600000),
+  SOL: QUOTE_PRECISION.mul(new BN(3500)),
+  BTC: new BN(500000),
   ETH: new BN(50000000),
-  APT: new BN(5000000000),
+  APT: new BN(8000000000),
   "1MBONK": new BN(50000000000),
   MATIC: new BN(40000000000),
   ARB: new BN(40000000000),
@@ -296,5 +344,6 @@ const ORDER_SIZE: { [key: string]: BN } = {
 };
 
 interface Order {
-  [key: string]: { bid: BN[]; ask: BN[] };
+  bid: BN[];
+  ask: BN[];
 }
