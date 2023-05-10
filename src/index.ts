@@ -10,6 +10,8 @@ const setup = async () => {
   // });
 
   drift.startBot(SUB_ACCOUNTS["SOL"], "SOL");
+  // drift.startBot(SUB_ACCOUNTS["BTC"], "BTC");
+  // drift.startBot(SUB_ACCOUNTS["1MBONK"], "1MBONK");
 };
 
 setup();

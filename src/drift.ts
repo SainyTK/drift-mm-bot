@@ -50,6 +50,7 @@ export class Drift {
   private wallet: Wallet;
   private bulkAccountLoader: BulkAccountLoader;
   private botAccount: string;
+  private user: User;
 
   constructor(botAccount: string) {
     this.botAccount = botAccount;
@@ -84,7 +85,7 @@ export class Drift {
 
     await this.driftClient.subscribe();
 
-    const user = new User({
+    this.user = new User({
       driftClient: this.driftClient,
       userAccountPublicKey: await this.driftClient.getUserAccountPublicKey(),
       accountSubscription: {
@@ -93,7 +94,7 @@ export class Drift {
       },
     });
 
-    await user.subscribe();
+    await this.user.subscribe();
 
     this.slotSubscriber = new SlotSubscriber(connection);
     await this.slotSubscriber.subscribe();
@@ -113,13 +114,21 @@ export class Drift {
       marketConfig.marketIndex
     );
 
+    const perpPositon = this.user.getPerpPosition(marketConfig.marketIndex);
+    if (
+      perpPositon.quoteEntryAmount &&
+      convertToNumber(perpPositon.quoteEntryAmount) > 0
+    ) {
+      await this.driftClient.closePosition(marketConfig.marketIndex);
+    }
+
     const slot = this.slotSubscriber.getSlot();
 
     const dlob = new DLOB();
     const l2 = dlob.getL2({
       marketIndex: marketConfig.marketIndex,
       marketType: MarketType.PERP,
-      depth: 10000,
+      depth: 1000000,
       oraclePriceData,
       slot: slot,
       fallbackBid: calculateBidPrice(marketAccount, oraclePriceData),
@@ -128,7 +137,7 @@ export class Drift {
         getVammL2Generator({
           marketAccount: marketAccount,
           oraclePriceData,
-          numOrders: 10000,
+          numOrders: 1000000,
         }),
       ],
     });
@@ -235,8 +244,6 @@ export class Drift {
 
     console.log("GENERAL DONE");
 
-    await sleep(1000);
-
     console.log("RESTART");
 
     this.startBot(subAccount, symbol);
@@ -332,11 +339,11 @@ export const SUB_ACCOUNTS: { [key: string]: number } = {
 };
 
 const ORDER_SIZE: { [key: string]: BN } = {
-  SOL: QUOTE_PRECISION.mul(new BN(3500)),
+  SOL: QUOTE_PRECISION.mul(new BN(6000)),
   BTC: new BN(500000),
-  ETH: new BN(50000000),
+  ETH: new BN(10000000),
   APT: new BN(8000000000),
-  "1MBONK": new BN(50000000000),
+  "1MBONK": new BN(1000000000),
   MATIC: new BN(40000000000),
   ARB: new BN(40000000000),
   DOGE: new BN(100000000000),
