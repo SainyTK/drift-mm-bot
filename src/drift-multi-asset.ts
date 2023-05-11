@@ -7,7 +7,6 @@ import {
   DriftEnv,
   PerpMarkets,
   convertToNumber,
-  SlotSubscriber,
   MarketType,
   PositionDirection,
   PerpMarketConfig,
@@ -31,10 +30,9 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { connection, env } from "./config/solanaConnection";
-import sleep from "./utils/sleep";
 import { postion } from "./utils/alerts";
 
-export class Drift {
+export class DriftMultiAsset {
   public env: DriftEnv = env;
   public connection = connection;
   public anchorProvider: AnchorProvider;
@@ -43,7 +41,6 @@ export class Drift {
   public perpMarkets = PerpMarkets[this.env];
   public driftClient: DriftClient;
 
-  private slotSubscriber: SlotSubscriber;
   private account: Keypair;
   private wallet: Wallet;
   private bulkAccountLoader: BulkAccountLoader;
@@ -67,7 +64,7 @@ export class Drift {
     this.bulkAccountLoader = new BulkAccountLoader(
       this.connection,
       "confirmed",
-      1000
+      6000
     );
 
     this.driftClient = new DriftClient({
@@ -93,73 +90,79 @@ export class Drift {
     });
 
     await this.user.subscribe();
-
-    this.slotSubscriber = new SlotSubscriber(connection);
-    await this.slotSubscriber.subscribe();
   };
 
-  public startBot = async (symbol: string) => {
+  public startBot = async () => {
     try {
       const orders: Order = {};
 
-      const marketConfig = this.fetchPerpMarket(symbol);
-      const perpPosition = this.user.getPerpPosition(marketConfig.marketIndex);
+      let i = 0;
 
-      const unrealizedPnl = this.user.getUnrealizedPNL(
-        false,
-        marketConfig.marketIndex
-      );
+      while (true) {
+        const symbol = RUN[i];
+        const marketConfig = this.fetchPerpMarket(symbol);
+        const perpPosition = this.user.getPerpPosition(
+          marketConfig.marketIndex
+        );
 
-      let pnl = convertToNumber(unrealizedPnl);
-      if (perpPosition && convertToNumber(perpPosition.settledPnl) !== 0) {
-        pnl = convertToNumber(perpPosition.settledPnl.add(unrealizedPnl));
+        const unrealizedPnl = this.user.getUnrealizedPNL(
+          false,
+          marketConfig.marketIndex
+        );
+
+        let pnl = convertToNumber(unrealizedPnl);
+        if (perpPosition && convertToNumber(perpPosition.settledPnl) !== 0) {
+          pnl = convertToNumber(perpPosition.settledPnl.add(unrealizedPnl));
+        }
+
+        if (perpPosition && pnl > 2) {
+          postion(symbol, convertToNumber(pnl));
+        }
+
+        if (
+          perpPosition &&
+          convertToNumber(perpPosition?.quoteEntryAmount) !== 0 &&
+          pnl !== 0
+        ) {
+          await this.driftClient.closePosition(marketConfig.marketIndex);
+        }
+
+        const oraclePriceData = this.fetchOraclePrice(symbol);
+
+        const { bestAsk, bestBid } = await this.printTopOfOrderLists(
+          marketConfig.marketIndex,
+          MarketType.PERP
+        );
+
+        const firstPercentage = new BN(PERCENT[symbol]);
+        const firstBestBid = bestBid.add(
+          bestBid.mul(firstPercentage).div(new BN("1000000"))
+        );
+        const firstBestAsk = bestAsk.sub(
+          bestAsk.mul(firstPercentage).div(new BN("1000000"))
+        );
+
+        console.log("********************************");
+        console.log(symbol);
+        console.log("ORC", convertToNumber(oraclePriceData.price));
+        console.log("1BID", convertToNumber(firstBestBid));
+        console.log("1ASK", convertToNumber(firstBestAsk));
+        console.log("********************************");
+
+        orders[symbol] = {
+          bid: [firstBestBid, bestBid],
+          ask: [firstBestAsk, bestAsk],
+        };
+
+        i++;
+
+        if (i === RUN.length) {
+          i = 0;
+
+          await this.openOrders(orders);
+        }
       }
-
-      if (perpPosition && pnl > 2) {
-        postion(symbol, convertToNumber(pnl));
-      }
-
-      if (
-        perpPosition &&
-        convertToNumber(perpPosition?.quoteEntryAmount) !== 0 &&
-        pnl < 0
-      ) {
-        await this.driftClient.closePosition(marketConfig.marketIndex);
-      }
-
-      const oraclePriceData = this.fetchOraclePrice(symbol);
-
-      const { bestAsk, bestBid } = await this.printTopOfOrderLists(
-        marketConfig.marketIndex,
-        MarketType.PERP
-      );
-
-      const firstPercentage = new BN(PERCENT[symbol]);
-      const firstBestBid = bestBid.add(
-        bestBid.mul(firstPercentage).div(new BN("1000000"))
-      );
-      const firstBestAsk = bestAsk.sub(
-        bestAsk.mul(firstPercentage).div(new BN("1000000"))
-      );
-
-      console.log("********************************");
-      console.log(symbol);
-      console.log("ORC", convertToNumber(oraclePriceData.price));
-      console.log("BID", convertToNumber(bestBid));
-      console.log("1BID", convertToNumber(firstBestBid));
-      console.log("ASK", convertToNumber(bestAsk));
-      console.log("1ASK", convertToNumber(firstBestAsk));
-      console.log("********************************");
-
-      orders[symbol] = {
-        bid: [bestBid, firstBestBid],
-        ask: [bestAsk, firstBestAsk],
-      };
-
-      await this.openOrders(orders);
-    } catch (err) {
-      console.error(err);
-    }
+    } catch {}
   };
 
   private openOrders = async (orders: Order) => {
@@ -214,7 +217,11 @@ export class Drift {
 
     await this.driftClient.sendTransaction(transaction, undefined, {
       commitment: "processed",
+      skipPreflight: true,
     });
+
+    console.log("TRANSACTION SENT");
+    console.log("********************************");
   };
 
   private placeOrders = async (
@@ -230,8 +237,9 @@ export class Drift {
         marketConfig.marketIndex
       );
 
-      const amount = MONEY * (i + 1);
+      const amount = MONEY * (i + 2);
 
+      const slot = await this.connection.getSlot();
       const dblob = new DLOB();
       const perpPrice = calculateEstimatedPerpEntryPrice(
         "quote",
@@ -242,7 +250,7 @@ export class Drift {
           perpMarketPrice.marketIndex
         ),
         dblob,
-        this.slotSubscriber.getSlot()
+        slot
       );
 
       const marketOrderParams = getLimitOrderParams({
@@ -253,6 +261,11 @@ export class Drift {
         triggerCondition: OrderTriggerCondition.ABOVE,
         price,
       });
+
+      this.driftClient.perpMarketLastSlotCache.set(
+        marketConfig.marketIndex,
+        slot
+      );
 
       instructions.push(
         await this.driftClient.getPlacePerpOrderIx(marketOrderParams)
@@ -310,7 +323,7 @@ export class Drift {
     const dlob = new DLOB();
     const market = this.driftClient.getPerpMarketAccount(marketIndex);
 
-    const slot = this.slotSubscriber.getSlot();
+    const slot = await this.driftClient.connection.getSlot();
     const oraclePriceData =
       this.driftClient.getOracleDataForPerpMarket(marketIndex);
     const fallbackAsk = calculateAskPrice(market, oraclePriceData);
@@ -345,12 +358,12 @@ export class Drift {
 const PERCENT: { [key: string]: BN } = {
   BTC: new BN(20),
   ETH: new BN(20),
-  SOL: new BN(200),
+  SOL: new BN(350),
 };
 
-const MONEY = 20;
+const MONEY = 4;
 
-export const RUN = ["SOL", "BTC", "ETH"];
+export const RUN = ["SOL"];
 
 interface Order {
   [key: string]: {
