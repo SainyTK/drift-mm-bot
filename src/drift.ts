@@ -102,25 +102,26 @@ export class Drift {
       const orders: Order = {};
 
       const marketConfig = this.fetchPerpMarket(symbol);
-      const perpPositon = this.user.getPerpPosition(marketConfig.marketIndex);
+      const perpPosition = this.user.getPerpPosition(marketConfig.marketIndex);
 
       const unrealizedPnl = this.user.getUnrealizedPNL(
         false,
         marketConfig.marketIndex
       );
 
-      console.log(convertToNumber(unrealizedPnl));
-      if (perpPositon && convertToNumber(unrealizedPnl) > 2) {
-        postion(
-          symbol,
-          convertToNumber(perpPositon.settledPnl)
-        );
+      let pnl = convertToNumber(unrealizedPnl);
+      if (convertToNumber(perpPosition.settledPnl) !== 0) {
+        pnl = convertToNumber(perpPosition.settledPnl.add(unrealizedPnl));
+      }
+
+      if (perpPosition && pnl > 2) {
+        postion(symbol, convertToNumber(pnl));
       }
 
       if (
-        perpPositon &&
-        convertToNumber(perpPositon?.quoteEntryAmount) !== 0 &&
-        convertToNumber(unrealizedPnl) < 0
+        perpPosition &&
+        convertToNumber(perpPosition?.quoteEntryAmount) !== 0 &&
+        pnl < 0
       ) {
         await this.driftClient.closePosition(marketConfig.marketIndex);
       }
@@ -133,7 +134,7 @@ export class Drift {
       );
 
       const firstPercentage = new BN(
-        symbol === "ETH" || symbol === "BTC" ? 90 : 300
+        symbol === "ETH" || symbol === "BTC" ? 50 : 210
       );
       const firstBestBid = bestBid.add(
         bestBid.mul(firstPercentage).div(new BN("1000000"))
@@ -143,7 +144,7 @@ export class Drift {
       );
 
       const secondPercentage = new BN(
-        symbol === "ETH" || symbol === "BTC" ? 110 : 350
+        symbol === "ETH" || symbol === "BTC" ? 80 : 240
       );
       const secondBestBid = bestBid.add(
         bestBid.mul(secondPercentage).div(new BN("1000000"))
@@ -347,10 +348,10 @@ export const RUN = [
 ];
 
 const ORDER_SIZE: { [key: string]: BN } = {
-  SOL: QUOTE_PRECISION.mul(new BN(6000)),
-  BTC: new BN(4000000),
-  ETH: new BN(20000000),
-  "1MBONK": new BN(340000000000),
+  SOL: QUOTE_PRECISION.mul(new BN(8800)),
+  BTC: new BN(15000000),
+  ETH: new BN(100000000),
+  "1MBONK": new BN(200000000000),
   // MATIC: new BN(40000000000),
   // ARB: new BN(40000000000),
   // DOGE: new BN(100000000000),
