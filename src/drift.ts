@@ -332,10 +332,10 @@ export class Drift {
 //
 
 const PERCENT: { [key: string]: BN[] } = {
-  BTC: [new BN(2), new BN(4)],
-  ETH: [new BN(2), new BN(4)],
-  SOL: [new BN(50), new BN(100)],
-  "1MBONK": [new BN(50), new BN(100)],
+  BTC: [new BN(1), new BN(2)],
+  ETH: [new BN(1), new BN(2)],
+  SOL: [new BN(20), new BN(40)],
+  "1MBONK": [new BN(20), new BN(40)],
 };
 
 export const RUN = [
