@@ -1,5 +1,4 @@
 import { Drift, RUN } from "./drift";
-import { crash } from "./utils/alerts";
 import sleep from "./utils/sleep";
 
 const drift = new Drift(process.env.ACCOUNT);
@@ -10,9 +9,9 @@ const initBots = async () => {
   while (true) {
     await drift.startBot(RUN[i]);
 
-    console.log("Sleeping for 1 seconds...");
+    console.log("Sleeping for 2 seconds...");
 
-    await sleep(1000);
+    await sleep(2000);
 
     i++;
 
@@ -20,7 +19,7 @@ const initBots = async () => {
       i = 0;
 
       console.log("STARTED ALL BOTS, RESTARTING...");
-      await sleep(2000);
+      await sleep(8000);
     }
   }
 };
@@ -36,3 +35,5 @@ const setup = async () => {
 };
 
 setup();
+
+// rua bulhao pato n 40

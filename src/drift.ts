@@ -20,6 +20,7 @@ import {
   calculateAskPrice,
   DLOB,
   calculateBidPrice,
+  calculateEstimatedPerpEntryPrice,
 } from "@drift-labs/sdk";
 import { AnchorProvider, BN } from "@project-serum/anchor";
 import { convertSecretKeyToKeypair } from "@slidelabs/solana-toolkit/build/utils/convertSecretKeyToKeypair";
@@ -128,12 +129,12 @@ export class Drift {
 
       const oraclePriceData = this.fetchOraclePrice(symbol);
 
-      const { bestAsk, bestBid } = this.printTopOfOrderLists(
+      const { bestAsk, bestBid } = await this.printTopOfOrderLists(
         marketConfig.marketIndex,
         MarketType.PERP
       );
 
-      const firstPercentage = new BN(PERCENT[symbol][0]);
+      const firstPercentage = new BN(PERCENT[symbol]);
       const firstBestBid = bestBid.add(
         bestBid.mul(firstPercentage).div(new BN("1000000"))
       );
@@ -141,36 +142,18 @@ export class Drift {
         bestAsk.mul(firstPercentage).div(new BN("1000000"))
       );
 
-      const secondPercentage = new BN(PERCENT[symbol][1]);
-      const secondBestBid = bestBid.add(
-        bestBid.mul(secondPercentage).div(new BN("1000000"))
-      );
-      const secondBestAsk = bestAsk.sub(
-        bestAsk.mul(secondPercentage).div(new BN("1000000"))
-      );
-
-      const thirdPercentage = new BN(PERCENT[symbol][3]);
-      const thirdBestBid = bestBid.add(
-        bestBid.mul(thirdPercentage).div(new BN("1000000"))
-      );
-      const thirdBestAsk = bestAsk.sub(
-        bestAsk.mul(thirdPercentage).div(new BN("1000000"))
-      );
-
       console.log("********************************");
       console.log(symbol);
       console.log("ORC", convertToNumber(oraclePriceData.price));
       console.log("BID", convertToNumber(bestBid));
       console.log("1BID", convertToNumber(firstBestBid));
-      console.log("2BID", convertToNumber(secondBestBid));
       console.log("ASK", convertToNumber(bestAsk));
       console.log("1ASK", convertToNumber(firstBestAsk));
-      console.log("2ASK", convertToNumber(secondBestAsk));
       console.log("********************************");
 
       orders[symbol] = {
-        bid: [bestBid, firstBestBid, secondBestBid],
-        ask: [bestAsk, firstBestAsk, secondBestAsk],
+        bid: [bestBid, firstBestBid],
+        ask: [bestAsk, firstBestAsk],
       };
 
       await this.openOrders(orders);
@@ -229,7 +212,9 @@ export class Drift {
     const transaction = new Transaction();
     transaction.instructions = instructions;
 
-    await this.driftClient.sendTransaction(transaction);
+    await this.driftClient.sendTransaction(transaction, undefined, {
+      commitment: "processed",
+    });
   };
 
   private placeOrders = async (
@@ -245,8 +230,23 @@ export class Drift {
         marketConfig.marketIndex
       );
 
+      const amount = MONEY * (i + 1);
+
+      const dblob = new DLOB();
+      const perpPrice = calculateEstimatedPerpEntryPrice(
+        "quote",
+        new BN(amount * 10).mul(QUOTE_PRECISION),
+        direction,
+        perpMarketPrice,
+        this.driftClient.getOracleDataForPerpMarket(
+          perpMarketPrice.marketIndex
+        ),
+        dblob,
+        this.slotSubscriber.getSlot()
+      );
+
       const marketOrderParams = getLimitOrderParams({
-        baseAssetAmount: ORDER_SIZE[marketConfig.baseAssetSymbol],
+        baseAssetAmount: perpPrice.baseFilled,
         direction: direction,
         marketIndex: perpMarketPrice.marketIndex,
         postOnly: PostOnlyParams.MUST_POST_ONLY,
@@ -303,7 +303,10 @@ export class Drift {
     }
   };
 
-  public printTopOfOrderLists(marketIndex: number, marketType: MarketType) {
+  public async printTopOfOrderLists(
+    marketIndex: number,
+    marketType: MarketType
+  ) {
     const dlob = new DLOB();
     const market = this.driftClient.getPerpMarketAccount(marketIndex);
 
@@ -339,35 +342,15 @@ export class Drift {
 // Utils
 //
 
-const PERCENT: { [key: string]: BN[] } = {
-  BTC: [new BN(4), new BN(8)],
-  ETH: [new BN(4), new BN(8)],
-  SOL: [new BN(70), new BN(140)],
+const PERCENT: { [key: string]: BN } = {
+  BTC: new BN(20),
+  ETH: new BN(20),
+  SOL: new BN(200),
 };
 
-export const RUN = [
-  "SOL",
-  "BTC",
-  "ETH",
-  // "APT",
-  // "1MBONK",
-  // "MATIC",
-  // "ARB",
-  // "DOGE",
-  // "BNB",
-];
+const MONEY = 20;
 
-const ORDER_SIZE: { [key: string]: BN } = {
-  SOL: QUOTE_PRECISION.mul(new BN(15000)),
-  BTC: new BN(10000000),
-  ETH: new BN(100000000),
-  // "1MBONK": new BN(700000000000),
-  // MATIC: new BN(40000000000),
-  // ARB: new BN(40000000000),
-  // DOGE: new BN(100000000000),
-  // BNB: new BN(100000000),
-  // APT: new BN(8000000000),
-};
+export const RUN = ["SOL", "BTC", "ETH"];
 
 interface Order {
   [key: string]: {
@@ -375,18 +358,6 @@ interface Order {
     ask: BN[];
   };
 }
-
-// 40% -> A - BIDE or ASK
-// 30% -> B - BIDE or ASK
-// 20% -> C - BIDE or ASK
-// 10% -> D<>F - BIDE or ASK
-
-// ORACLE = 20.60
-
-// let i = 1
-
-// bid = (oracle - (oracle - i/10))
-// ask = (oracle - (oracle - i/10))
 
 // const bidSpread =
 // (convertToNumber(bestBid, PRICE_PRECISION) /
