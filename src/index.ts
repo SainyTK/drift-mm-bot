@@ -20,7 +20,7 @@ const initBots = async () => {
       i = 0;
 
       console.log("STARTED ALL BOTS, RESTARTING...");
-      await sleep(3000);
+      await sleep(2000);
     }
   }
 };

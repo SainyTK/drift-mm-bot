@@ -110,7 +110,7 @@ export class Drift {
       );
 
       let pnl = convertToNumber(unrealizedPnl);
-      if (convertToNumber(perpPosition.settledPnl) !== 0) {
+      if (perpPosition && convertToNumber(perpPosition.settledPnl) !== 0) {
         pnl = convertToNumber(perpPosition.settledPnl.add(unrealizedPnl));
       }
 
@@ -149,6 +149,14 @@ export class Drift {
         bestAsk.mul(secondPercentage).div(new BN("1000000"))
       );
 
+      const thirdPercentage = new BN(PERCENT[symbol][3]);
+      const thirdBestBid = bestBid.add(
+        bestBid.mul(thirdPercentage).div(new BN("1000000"))
+      );
+      const thirdBestAsk = bestAsk.sub(
+        bestAsk.mul(thirdPercentage).div(new BN("1000000"))
+      );
+
       console.log("********************************");
       console.log(symbol);
       console.log("ORC", convertToNumber(oraclePriceData.price));
@@ -161,8 +169,8 @@ export class Drift {
       console.log("********************************");
 
       orders[symbol] = {
-        bid: [firstBestBid, secondBestBid],
-        ask: [firstBestAsk, secondBestAsk],
+        bid: [bestBid, firstBestBid, secondBestBid],
+        ask: [bestAsk, firstBestAsk, secondBestAsk],
       };
 
       await this.openOrders(orders);
@@ -332,10 +340,9 @@ export class Drift {
 //
 
 const PERCENT: { [key: string]: BN[] } = {
-  BTC: [new BN(1), new BN(2)],
-  ETH: [new BN(1), new BN(2)],
-  SOL: [new BN(20), new BN(40)],
-  "1MBONK": [new BN(20), new BN(40)],
+  BTC: [new BN(10), new BN(15)],
+  ETH: [new BN(10), new BN(15)],
+  SOL: [new BN(80), new BN(160)],
 };
 
 export const RUN = [
@@ -343,7 +350,7 @@ export const RUN = [
   "BTC",
   "ETH",
   // "APT",
-  "1MBONK",
+  // "1MBONK",
   // "MATIC",
   // "ARB",
   // "DOGE",
@@ -351,10 +358,10 @@ export const RUN = [
 ];
 
 const ORDER_SIZE: { [key: string]: BN } = {
-  SOL: QUOTE_PRECISION.mul(new BN(14000)),
+  SOL: QUOTE_PRECISION.mul(new BN(20000)),
   BTC: new BN(10000000),
   ETH: new BN(100000000),
-  "1MBONK": new BN(200000000000),
+  // "1MBONK": new BN(700000000000),
   // MATIC: new BN(40000000000),
   // ARB: new BN(40000000000),
   // DOGE: new BN(100000000000),
