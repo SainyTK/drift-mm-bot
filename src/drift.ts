@@ -342,7 +342,7 @@ export class Drift {
 const PERCENT: { [key: string]: BN[] } = {
   BTC: [new BN(4), new BN(8)],
   ETH: [new BN(4), new BN(8)],
-  SOL: [new BN(80), new BN(160)],
+  SOL: [new BN(70), new BN(140)],
 };
 
 export const RUN = [
@@ -358,7 +358,7 @@ export const RUN = [
 ];
 
 const ORDER_SIZE: { [key: string]: BN } = {
-  SOL: QUOTE_PRECISION.mul(new BN(20000)),
+  SOL: QUOTE_PRECISION.mul(new BN(15000)),
   BTC: new BN(10000000),
   ETH: new BN(100000000),
   // "1MBONK": new BN(700000000000),
