@@ -133,7 +133,7 @@ export class Drift {
       );
 
       const firstPercentage = new BN(
-        symbol === "ETH" || symbol === "BTC" ? 100 : 300
+        symbol === "ETH" || symbol === "BTC" ? 90 : 300
       );
       const firstBestBid = bestBid.add(
         bestBid.mul(firstPercentage).div(new BN("1000000"))
@@ -143,7 +143,7 @@ export class Drift {
       );
 
       const secondPercentage = new BN(
-        symbol === "ETH" || symbol === "BTC" ? 150 : 350
+        symbol === "ETH" || symbol === "BTC" ? 110 : 350
       );
       const secondBestBid = bestBid.add(
         bestBid.mul(secondPercentage).div(new BN("1000000"))
