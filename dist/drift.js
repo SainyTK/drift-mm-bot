@@ -1,4 +1,7 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SUB_ACCOUNTS = exports.Drift = void 0;
 const sdk_1 = require("@drift-labs/sdk");
@@ -6,6 +9,7 @@ const anchor_1 = require("@project-serum/anchor");
 const convertSecretKeyToKeypair_1 = require("@slidelabs/solana-toolkit/build/utils/convertSecretKeyToKeypair");
 const web3_js_1 = require("@solana/web3.js");
 const solanaConnection_1 = require("./config/solanaConnection");
+const sleep_1 = __importDefault(require("./utils/sleep"));
 class Drift {
     constructor(botAccount) {
         this.env = solanaConnection_1.env;
@@ -46,7 +50,7 @@ class Drift {
                 bid: [],
                 ask: [],
             };
-            await this.driftClient.switchActiveUser(subAccount);
+            this.driftClient.switchActiveUser(subAccount);
             const oraclePriceData = this.fetchOraclePrice(symbol);
             const marketConfig = this.fetchPerpMarket(symbol);
             const marketAccount = this.driftClient.getPerpMarketAccount(marketConfig.marketIndex);
@@ -60,7 +64,7 @@ class Drift {
             const l2 = dlob.getL2({
                 marketIndex: marketConfig.marketIndex,
                 marketType: sdk_1.MarketType.PERP,
-                depth: 1000000,
+                depth: 100000,
                 oraclePriceData,
                 slot: slot,
                 fallbackBid: (0, sdk_1.calculateBidPrice)(marketAccount, oraclePriceData),
@@ -69,7 +73,7 @@ class Drift {
                     (0, sdk_1.getVammL2Generator)({
                         marketAccount: marketAccount,
                         oraclePriceData,
-                        numOrders: 1000000,
+                        numOrders: 100000,
                     }),
                 ],
             });
@@ -130,6 +134,7 @@ class Drift {
             await this.driftClient.sendTransaction(shortTransaction);
             console.log(`DONE ${symbol}`);
             console.log("GENERAL DONE");
+            await (0, sleep_1.default)(500);
             console.log("RESTART");
             this.startBot(subAccount, symbol);
         };
@@ -199,7 +204,7 @@ exports.SUB_ACCOUNTS = {
 const ORDER_SIZE = {
     SOL: sdk_1.QUOTE_PRECISION.mul(new anchor_1.BN(6000)),
     BTC: new anchor_1.BN(500000),
-    ETH: new anchor_1.BN(10000000),
+    ETH: new anchor_1.BN(60000000),
     APT: new anchor_1.BN(8000000000),
     "1MBONK": new anchor_1.BN(1000000000),
     MATIC: new anchor_1.BN(40000000000),
