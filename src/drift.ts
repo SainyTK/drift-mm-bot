@@ -133,9 +133,7 @@ export class Drift {
         MarketType.PERP
       );
 
-      const firstPercentage = new BN(
-        symbol === "ETH" || symbol === "BTC" ? 50 : 210
-      );
+      const firstPercentage = new BN(PERCENT[symbol][0]);
       const firstBestBid = bestBid.add(
         bestBid.mul(firstPercentage).div(new BN("1000000"))
       );
@@ -143,9 +141,7 @@ export class Drift {
         bestAsk.mul(firstPercentage).div(new BN("1000000"))
       );
 
-      const secondPercentage = new BN(
-        symbol === "ETH" || symbol === "BTC" ? 80 : 240
-      );
+      const secondPercentage = new BN(PERCENT[symbol][1]);
       const secondBestBid = bestBid.add(
         bestBid.mul(secondPercentage).div(new BN("1000000"))
       );
@@ -335,6 +331,13 @@ export class Drift {
 // Utils
 //
 
+const PERCENT: { [key: string]: BN[] } = {
+  BTC: [new BN(2), new BN(4)],
+  ETH: [new BN(2), new BN(4)],
+  SOL: [new BN(50), new BN(100)],
+  "1MBONK": [new BN(50), new BN(100)],
+};
+
 export const RUN = [
   "SOL",
   "BTC",
@@ -348,8 +351,8 @@ export const RUN = [
 ];
 
 const ORDER_SIZE: { [key: string]: BN } = {
-  SOL: QUOTE_PRECISION.mul(new BN(8800)),
-  BTC: new BN(15000000),
+  SOL: QUOTE_PRECISION.mul(new BN(14000)),
+  BTC: new BN(10000000),
   ETH: new BN(100000000),
   "1MBONK": new BN(200000000000),
   // MATIC: new BN(40000000000),

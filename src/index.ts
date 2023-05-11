@@ -10,9 +10,9 @@ const initBots = async () => {
   while (true) {
     await drift.startBot(RUN[i]);
 
-    console.log("Sleeping for 1.5 seconds...");
+    console.log("Sleeping for 1 seconds...");
 
-    await sleep(1500);
+    await sleep(1000);
 
     i++;
 
@@ -20,7 +20,7 @@ const initBots = async () => {
       i = 0;
 
       console.log("STARTED ALL BOTS, RESTARTING...");
-      await sleep(4000);
+      await sleep(3000);
     }
   }
 };
