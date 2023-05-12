@@ -64,7 +64,7 @@ export class DriftMultiAsset {
     this.bulkAccountLoader = new BulkAccountLoader(
       this.connection,
       "confirmed",
-      6000
+      5000
     );
 
     this.driftClient = new DriftClient({
@@ -105,24 +105,9 @@ export class DriftMultiAsset {
           marketConfig.marketIndex
         );
 
-        const unrealizedPnl = this.user.getUnrealizedPNL(
-          false,
-          marketConfig.marketIndex
-        );
-
-        let pnl = convertToNumber(unrealizedPnl);
-        if (perpPosition && convertToNumber(perpPosition.settledPnl) !== 0) {
-          pnl = convertToNumber(perpPosition.settledPnl.add(unrealizedPnl));
-        }
-
-        if (perpPosition && pnl > 2) {
-          postion(symbol, convertToNumber(pnl));
-        }
-
         if (
           perpPosition &&
-          convertToNumber(perpPosition?.quoteEntryAmount) !== 0 &&
-          pnl !== 0
+          convertToNumber(perpPosition?.quoteEntryAmount) !== 0
         ) {
           await this.driftClient.closePosition(marketConfig.marketIndex);
         }
@@ -134,24 +119,35 @@ export class DriftMultiAsset {
           MarketType.PERP
         );
 
-        const firstPercentage = new BN(PERCENT[symbol]);
-        const firstBestBid = bestBid.add(
-          bestBid.mul(firstPercentage).div(new BN("1000000"))
+        const firstPercentage = new BN(800).mul(new BN(1500).div(new BN(1800)));
+        const secondPercentage = new BN(800).mul(new BN(3000).div(new BN(1800)));
+
+        const firstBestBid = bestBid.sub(
+          bestBid.mul(firstPercentage).div(new BN(1000000))
         );
-        const firstBestAsk = bestAsk.sub(
-          bestAsk.mul(firstPercentage).div(new BN("1000000"))
+        const firstBestAsk = bestAsk.add(
+          bestAsk.mul(firstPercentage).div(new BN(1000000))
+        );
+
+        const secondBestBid = bestBid.sub(
+          bestBid.mul(secondPercentage).div(new BN(1000000))
+        );
+        const secondBestAsk = bestAsk.add(
+          bestAsk.mul(secondPercentage).div(new BN(1000000))
         );
 
         console.log("********************************");
         console.log(symbol);
         console.log("ORC", convertToNumber(oraclePriceData.price));
         console.log("1BID", convertToNumber(firstBestBid));
+        console.log("2BID", convertToNumber(secondBestBid));
         console.log("1ASK", convertToNumber(firstBestAsk));
+        console.log("2ASK", convertToNumber(secondBestAsk));
         console.log("********************************");
 
         orders[symbol] = {
-          bid: [firstBestBid, bestBid],
-          ask: [firstBestAsk, bestAsk],
+          bid: [firstBestBid, secondBestBid],
+          ask: [firstBestAsk, secondBestAsk],
         };
 
         i++;
@@ -217,7 +213,6 @@ export class DriftMultiAsset {
 
     await this.driftClient.sendTransaction(transaction, undefined, {
       commitment: "processed",
-      skipPreflight: true,
     });
 
     console.log("TRANSACTION SENT");
@@ -237,7 +232,15 @@ export class DriftMultiAsset {
         marketConfig.marketIndex
       );
 
-      const amount = MONEY * (i + 2);
+      let amount = MONEY;
+
+      if (i === 0) {
+        amount = MONEY * 2;
+      }
+
+      if (i === 1) {
+        amount = MONEY * 4;
+      }
 
       const slot = await this.connection.getSlot();
       const dblob = new DLOB();
@@ -354,12 +357,6 @@ export class DriftMultiAsset {
 //
 // Utils
 //
-
-const PERCENT: { [key: string]: BN } = {
-  BTC: new BN(20),
-  ETH: new BN(20),
-  SOL: new BN(350),
-};
 
 const MONEY = 4;
 
