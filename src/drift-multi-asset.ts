@@ -124,7 +124,7 @@ export class DriftMultiAsset {
                 1) *
               100.0;
 
-            if (bidSpread < 0.008 || bidSpread > 0.12) {
+            if (bidSpread < 0.008 || bidSpread > 0.1) {
               console.log("***************************");
               console.log(
                 `${this.fetchPerpMarket(undefined, order.marketIndex).symbol}`
@@ -148,7 +148,7 @@ export class DriftMultiAsset {
                 1) *
               100.0;
 
-            if (askSpread < 0.008 || askSpread > 0.12) {
+            if (askSpread < 0.008 || askSpread > 0.1) {
               console.log("***************************");
               console.log(`OR${convertToNumber(oraclePriceData.price)}`);
               console.log(
@@ -237,7 +237,7 @@ export class DriftMultiAsset {
           MarketType.PERP
         );
 
-        const firstPercentage = new BN(1000).div(new BN(2));
+        const firstPercentage = new BN(1000).div(new BN(3));
 
         const firstBestBid = bestBid.add(
           bestBid.mul(firstPercentage).div(new BN(1000000))
@@ -303,7 +303,9 @@ export class DriftMultiAsset {
         const transaction = new Transaction();
         transaction.instructions = instructions;
 
-        await this.driftClient.sendTransaction(transaction);
+        await this.driftClient.sendTransaction(transaction, undefined, {
+          commitment: "processed",
+        });
       }
     } catch {}
   };
@@ -323,28 +325,6 @@ export class DriftMultiAsset {
         );
 
         let amount = 6;
-
-        const oraclePriceData = this.fetchOraclePrice(
-          marketConfig.baseAssetSymbol
-        );
-
-        const spread = this.calcSpread(
-          oraclePriceData.price,
-          price,
-          direction === PositionDirection.LONG ? "LONG" : "SHORT"
-        );
-
-        if (spread > 0.019) {
-          continue;
-        }
-
-        if (spread < 0.015) {
-          amount = 12;
-        }
-
-        if (spread < 0.009) {
-          amount = 24;
-        }
 
         const slot = await this.connection.getSlot();
         const dblob = new DLOB();
