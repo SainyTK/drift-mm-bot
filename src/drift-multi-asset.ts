@@ -20,6 +20,8 @@ import {
   DLOB,
   calculateBidPrice,
   calculateEstimatedPerpEntryPrice,
+  PRICE_PRECISION,
+  calculatePositionPNL,
 } from "@drift-labs/sdk";
 import { AnchorProvider, BN } from "@project-serum/anchor";
 import { convertSecretKeyToKeypair } from "@slidelabs/solana-toolkit/build/utils/convertSecretKeyToKeypair";
@@ -104,16 +106,26 @@ export class DriftMultiAsset {
         const perpPosition = this.user.getPerpPosition(
           marketConfig.marketIndex
         );
+        const perpMarketPrice = this.driftClient.getPerpMarketAccount(
+          marketConfig.marketIndex
+        );
+
+        const oraclePriceData = this.fetchOraclePrice(symbol);
+
+        const unrealizedPnl = calculatePositionPNL(
+          perpMarketPrice,
+          perpPosition,
+          false,
+          oraclePriceData
+        );
 
         if (
           perpPosition &&
-          convertToNumber(perpPosition?.quoteEntryAmount) !== 0 &&
-          convertToNumber(perpPosition.settledPnl) < 0
+          convertToNumber(perpPosition.quoteEntryAmount) !== 0 &&
+          convertToNumber(unrealizedPnl) < 0
         ) {
           await this.driftClient.closePosition(marketConfig.marketIndex);
         }
-
-        const oraclePriceData = this.fetchOraclePrice(symbol);
 
         const { bestAsk, bestBid } = await this.printTopOfOrderLists(
           marketConfig.marketIndex,
@@ -353,7 +365,7 @@ export class DriftMultiAsset {
 // Utils
 //
 
-const MONEY = 6;
+const MONEY = 8;
 
 export const RUN = ["SOL", "ETH", "1MBONK"];
 
