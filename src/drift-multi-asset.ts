@@ -146,8 +146,8 @@ export class DriftMultiAsset {
         console.log("********************************");
 
         orders[symbol] = {
-          bid: [firstBestBid, secondBestBid],
-          ask: [firstBestAsk, secondBestAsk],
+          bid: [firstBestBid],
+          ask: [firstBestAsk],
         };
 
         i++;
@@ -158,7 +158,9 @@ export class DriftMultiAsset {
           await this.openOrders(orders);
         }
       }
-    } catch {}
+    } catch(e) {
+      console.log(e);
+    }
   };
 
   private openOrders = async (orders: Order) => {
@@ -358,9 +360,9 @@ export class DriftMultiAsset {
 // Utils
 //
 
-const MONEY = 4;
+const MONEY = 6;
 
-export const RUN = ["SOL"];
+export const RUN = ["SOL", "ETH", "BTC"];
 
 interface Order {
   [key: string]: {
