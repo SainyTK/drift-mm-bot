@@ -22,6 +22,8 @@ import {
   calculateEstimatedPerpEntryPrice,
   PRICE_PRECISION,
   calculatePositionPNL,
+  OrderStatus,
+  OrderType,
 } from "@drift-labs/sdk";
 import { AnchorProvider, BN } from "@project-serum/anchor";
 import { convertSecretKeyToKeypair } from "@slidelabs/solana-toolkit/build/utils/convertSecretKeyToKeypair";
@@ -33,6 +35,7 @@ import {
 } from "@solana/web3.js";
 import { connection, env } from "./config/solanaConnection";
 import { postion } from "./utils/alerts";
+import { logger } from "./utils/logger";
 
 export class DriftMultiAsset {
   public env: DriftEnv = env;
@@ -66,7 +69,7 @@ export class DriftMultiAsset {
     this.bulkAccountLoader = new BulkAccountLoader(
       this.connection,
       "confirmed",
-      5000
+      1000
     );
 
     this.driftClient = new DriftClient({
@@ -92,26 +95,92 @@ export class DriftMultiAsset {
     });
 
     await this.user.subscribe();
+
+    this.subscribeOrders();
+  };
+
+  subscribeOrders = async () => {
+    setInterval(() => {
+      const activeOrders = this.driftClient
+        .getUserAccount()
+        .orders.filter((item) => item.orderId);
+
+      activeOrders.forEach((order) => {
+        const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(
+          order.marketIndex
+        );
+
+        const direction = order.direction as {
+          long: {};
+          short: {};
+        };
+
+        if (direction.long) {
+          const bidSpread =
+            (convertToNumber(oraclePriceData.price, PRICE_PRECISION) /
+              convertToNumber(order.price, PRICE_PRECISION) -
+              1) *
+            100.0;
+
+          if (bidSpread < 0.008 || bidSpread > 0.1) {
+            console.log("***************************");
+            console.log(
+              `${this.fetchPerpMarket(undefined, order.marketIndex).symbol}`
+            );
+            console.log(`OR${convertToNumber(oraclePriceData.price)}`);
+            console.log(
+              `BID CLOSED`,
+              convertToNumber(order.price, PRICE_PRECISION).toFixed(4),
+              `(${bidSpread.toFixed(4)}%)`
+            );
+
+            this.driftClient.cancelOrder(order.orderId);
+            console.log("***************************\n");
+          }
+        }
+
+        if (direction.short) {
+          const askSpread =
+            (convertToNumber(order.price, PRICE_PRECISION) /
+              convertToNumber(oraclePriceData.price, PRICE_PRECISION) -
+              1) *
+            100.0;
+
+          if (askSpread < 0.008 || askSpread > 0.1) {
+            console.log("***************************");
+            console.log(`OR${convertToNumber(oraclePriceData.price)}`);
+            console.log(
+              `${this.fetchPerpMarket(undefined, order.marketIndex).symbol}`
+            );
+            console.log(
+              `ASK CLOSED`,
+              convertToNumber(order.price, PRICE_PRECISION).toFixed(4),
+              `(${askSpread.toFixed(4)}%)`
+            );
+            this.driftClient.cancelOrder(order.orderId);
+            console.log("***************************\n");
+          }
+        }
+      });
+    }, 1000);
   };
 
   public startBot = async () => {
-    try {
-      const orders: Order = {};
+    const orders: Order = {};
 
-      let i = 0;
+    let i = 0;
 
-      while (true) {
-        const symbol = RUN[i];
-        const marketConfig = this.fetchPerpMarket(symbol);
-        const perpPosition = this.user.getPerpPosition(
-          marketConfig.marketIndex
-        );
-        const perpMarketPrice = this.driftClient.getPerpMarketAccount(
-          marketConfig.marketIndex
-        );
+    while (true) {
+      const symbol = RUN[i];
+      const marketConfig = this.fetchPerpMarket(symbol);
+      const perpPosition = this.user.getPerpPosition(marketConfig.marketIndex);
+      const perpMarketPrice = this.driftClient.getPerpMarketAccount(
+        marketConfig.marketIndex
+      );
 
-        const oraclePriceData = this.fetchOraclePrice(symbol);
+      const oraclePriceData = this.fetchOraclePrice(symbol);
 
+      if (perpPosition) {
         const unrealizedPnl = calculatePositionPNL(
           perpMarketPrice,
           perpPosition,
@@ -120,51 +189,40 @@ export class DriftMultiAsset {
         );
 
         if (
-          perpPosition &&
           convertToNumber(perpPosition.quoteEntryAmount) !== 0 &&
-          convertToNumber(unrealizedPnl) < 0
+          (convertToNumber(unrealizedPnl) < 0 ||
+            convertToNumber(unrealizedPnl) > 1.5)
         ) {
           await this.driftClient.closePosition(marketConfig.marketIndex);
         }
-
-        const { bestAsk, bestBid } = await this.printTopOfOrderLists(
-          marketConfig.marketIndex,
-          MarketType.PERP
-        );
-
-        const firstPercentage = new BN(1000).div(new BN(5));
-
-        const firstBestBid = bestBid.add(
-          bestBid.mul(firstPercentage).div(new BN(1000000))
-        );
-        const firstBestAsk = bestAsk.sub(
-          bestAsk.mul(firstPercentage).div(new BN(1000000))
-        );
-
-        console.log("********************************");
-        console.log(symbol);
-        console.log("ORC", convertToNumber(oraclePriceData.price));
-        console.log("BEST", convertToNumber(bestBid));
-        console.log("1BID", convertToNumber(firstBestBid));
-        console.log("ASK", convertToNumber(bestAsk));
-        console.log("1ASK", convertToNumber(firstBestAsk));
-        console.log("********************************");
-
-        orders[symbol] = {
-          bid: [firstBestBid],
-          ask: [firstBestAsk],
-        };
-
-        i++;
-
-        if (i === RUN.length) {
-          i = 0;
-
-          await this.openOrders(orders);
-        }
       }
-    } catch (e) {
-      console.log(e);
+
+      const { bestAsk, bestBid } = await this.printTopOfOrderLists(
+        marketConfig.marketIndex,
+        MarketType.PERP
+      );
+
+      const firstPercentage = new BN(1000).div(new BN(2));
+
+      const firstBestBid = bestBid.add(
+        bestBid.mul(firstPercentage).div(new BN(1000000))
+      );
+      const firstBestAsk = bestAsk.sub(
+        bestAsk.mul(firstPercentage).div(new BN(1000000))
+      );
+
+      orders[symbol] = {
+        bid: [firstBestBid],
+        ask: [firstBestAsk],
+      };
+
+      i++;
+
+      if (i === RUN.length) {
+        i = 0;
+
+        await this.openOrders(orders);
+      }
     }
   };
 
@@ -176,26 +234,15 @@ export class DriftMultiAsset {
       const order = orders[symbol];
       const marketConfig = this.fetchPerpMarket(symbol);
 
-      if (
-        this.driftClient
-          .getUserAccount()
-          .orders.find((item) => item.marketIndex === marketConfig.marketIndex)
-      ) {
-        instructions.push(
-          await this.driftClient.getCancelOrdersIx(
-            MarketType.PERP,
-            marketConfig.marketIndex,
-            PositionDirection.LONG
-          )
+      const ordersAmount = this.driftClient
+        .getUserAccount()
+        .orders.filter(
+          (item) =>
+            item.marketIndex === marketConfig.marketIndex && item.orderId
         );
 
-        instructions.push(
-          await this.driftClient.getCancelOrdersIx(
-            MarketType.PERP,
-            marketConfig.marketIndex,
-            PositionDirection.SHORT
-          )
-        );
+      if (ordersAmount.length >= 28) {
+        continue;
       }
 
       instructions.push(
@@ -215,15 +262,14 @@ export class DriftMultiAsset {
       );
     }
 
-    const transaction = new Transaction();
-    transaction.instructions = instructions;
+    if (instructions.length > 0) {
+      const transaction = new Transaction();
+      transaction.instructions = instructions;
 
-    await this.driftClient.sendTransaction(transaction, undefined, {
-      commitment: "processed",
-    });
-
-    console.log("TRANSACTION SENT");
-    console.log("********************************");
+      await this.driftClient.sendTransaction(transaction, undefined, {
+        commitment: "processed",
+      });
+    }
   };
 
   private placeOrders = async (
@@ -285,8 +331,11 @@ export class DriftMultiAsset {
     return instructions;
   };
 
-  public fetchPerpMarket = (symbol: string) => {
-    return this.perpMarkets.find((market) => market.baseAssetSymbol === symbol);
+  public fetchPerpMarket = (symbol: string, marketIndex?: number) => {
+    return this.perpMarkets.find(
+      (market) =>
+        market.baseAssetSymbol === symbol || marketIndex === market.marketIndex
+    );
   };
 
   public fetchPrice = (symbol: string) => {
@@ -365,9 +414,9 @@ export class DriftMultiAsset {
 // Utils
 //
 
-const MONEY = 8;
+const MONEY = 3;
 
-export const RUN = ["SOL", "ETH", "1MBONK"];
+export const RUN = ["SOL"];
 
 interface Order {
   [key: string]: {
