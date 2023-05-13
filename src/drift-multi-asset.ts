@@ -107,7 +107,8 @@ export class DriftMultiAsset {
 
         if (
           perpPosition &&
-          convertToNumber(perpPosition?.quoteEntryAmount) !== 0
+          convertToNumber(perpPosition?.quoteEntryAmount) !== 0 &&
+          convertToNumber(perpPosition.settledPnl) < 0
         ) {
           await this.driftClient.closePosition(marketConfig.marketIndex);
         }
@@ -119,30 +120,22 @@ export class DriftMultiAsset {
           MarketType.PERP
         );
 
-        const firstPercentage = new BN(800).mul(new BN(1500).div(new BN(1800)));
-        const secondPercentage = new BN(800).mul(new BN(3000).div(new BN(1800)));
+        const firstPercentage = new BN(1000).div(new BN(5));
 
-        const firstBestBid = bestBid.sub(
+        const firstBestBid = bestBid.add(
           bestBid.mul(firstPercentage).div(new BN(1000000))
         );
-        const firstBestAsk = bestAsk.add(
+        const firstBestAsk = bestAsk.sub(
           bestAsk.mul(firstPercentage).div(new BN(1000000))
-        );
-
-        const secondBestBid = bestBid.sub(
-          bestBid.mul(secondPercentage).div(new BN(1000000))
-        );
-        const secondBestAsk = bestAsk.add(
-          bestAsk.mul(secondPercentage).div(new BN(1000000))
         );
 
         console.log("********************************");
         console.log(symbol);
         console.log("ORC", convertToNumber(oraclePriceData.price));
+        console.log("BEST", convertToNumber(bestBid));
         console.log("1BID", convertToNumber(firstBestBid));
-        console.log("2BID", convertToNumber(secondBestBid));
+        console.log("ASK", convertToNumber(bestAsk));
         console.log("1ASK", convertToNumber(firstBestAsk));
-        console.log("2ASK", convertToNumber(secondBestAsk));
         console.log("********************************");
 
         orders[symbol] = {
@@ -158,7 +151,7 @@ export class DriftMultiAsset {
           await this.openOrders(orders);
         }
       }
-    } catch(e) {
+    } catch (e) {
       console.log(e);
     }
   };
@@ -362,7 +355,7 @@ export class DriftMultiAsset {
 
 const MONEY = 6;
 
-export const RUN = ["SOL", "ETH", "BTC"];
+export const RUN = ["SOL", "ETH", "1MBONK"];
 
 interface Order {
   [key: string]: {
