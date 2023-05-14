@@ -70,7 +70,7 @@ export class DriftMultiAsset {
     this.bulkAccountLoader = new BulkAccountLoader(
       this.connection,
       "confirmed",
-      1000
+      500
     );
 
     this.driftClient = new DriftClient({
@@ -165,7 +165,7 @@ export class DriftMultiAsset {
             }
           }
         });
-      }, 1000);
+      }, 500);
     } catch (e) {
       console.log(e);
     }
@@ -226,7 +226,7 @@ export class DriftMultiAsset {
           if (
             convertToNumber(perpPosition.quoteEntryAmount) !== 0 &&
             (convertToNumber(unrealizedPnl) < 0 ||
-              convertToNumber(unrealizedPnl) > 1)
+              convertToNumber(unrealizedPnl) > 0.5)
           ) {
             await this.driftClient.closePosition(marketConfig.marketIndex);
           }
@@ -237,7 +237,7 @@ export class DriftMultiAsset {
           MarketType.PERP
         );
 
-        const firstPercentage = new BN(1000).div(new BN(3));
+        const firstPercentage = new BN(1000).div(new BN(4));
 
         const firstBestBid = bestBid.add(
           bestBid.mul(firstPercentage).div(new BN(1000000))
@@ -304,7 +304,7 @@ export class DriftMultiAsset {
         transaction.instructions = instructions;
 
         await this.driftClient.sendTransaction(transaction, undefined, {
-          commitment: "processed",
+          commitment: "confirmed",
         });
       }
     } catch {}
@@ -324,7 +324,7 @@ export class DriftMultiAsset {
           marketConfig.marketIndex
         );
 
-        let amount = 6;
+        let amount = 10;
 
         const slot = await this.connection.getSlot();
         const dblob = new DLOB();
@@ -446,7 +446,7 @@ export class DriftMultiAsset {
 // Utils
 //
 
-export const RUN = ["SOL"];
+export const RUN = ["ETH"];
 
 interface Order {
   [key: string]: {
