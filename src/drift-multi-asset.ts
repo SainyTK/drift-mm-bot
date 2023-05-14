@@ -303,9 +303,7 @@ export class DriftMultiAsset {
         const transaction = new Transaction();
         transaction.instructions = instructions;
 
-        await this.driftClient.sendTransaction(transaction, undefined, {
-          commitment: "confirmed",
-        });
+        await this.driftClient.sendTransaction(transaction);
       }
     } catch {}
   };
